@@ -1,0 +1,6 @@
+@CodeCase_HostAddress = http://localhost:5182
+
+GET {{CodeCase_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
