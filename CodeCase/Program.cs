@@ -1,36 +1,27 @@
-
-namespace CodeCase
+﻿using CodeCase;
+using DBConnection;
+public static class Program
 {
-    public class Program
+    public static string mongoConnectionString;
+
+    public static void Main(string[] args)
     {
-        public static void Main(string[] args)
-        {
-            var builder = WebApplication.CreateBuilder(args);
+        var builder = WebApplication.CreateBuilder(args);
+        builder.Services.AddControllersWithViews();
 
-            // Add services to the container.
+        mongoConnectionString = builder.Configuration["MongoDBConnectionString"];
+        builder.Services.AddSingleton(new MongoDbContext(mongoConnectionString!));
 
-            builder.Services.AddControllers();
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
+        var app = builder.Build();
 
-            var app = builder.Build();
+        app.UseMiddleware<ExceptionMiddleware>();
 
-            // Configure the HTTP request pipeline.
-            if (app.Environment.IsDevelopment())
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI();
-            }
+        app.UseRouting();
 
-            app.UseHttpsRedirection();
+        app.MapControllerRoute(
+            name: "default",
+            pattern: "{controller=Work}/{action=Index}/{id?}");
 
-            app.UseAuthorization();
-
-
-            app.MapControllers();
-
-            app.Run();
-        }
+        app.Run();
     }
 }
