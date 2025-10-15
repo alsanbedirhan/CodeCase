@@ -1,27 +1,33 @@
-﻿using DBConnection;
+﻿using Amazon.Runtime.Internal.Util;
+using DBConnection;
 using DBConnection.Models;
 using MongoDB.Driver;
+using System.Collections.Concurrent;
+using System.Diagnostics.Contracts;
 
 namespace CodeCase
 {
     public class ConfigurationReader
     {
-        MongoDbContext _clientContext;
         MongoDbContext _context;
-        string _applicationName, _connectionString;
+        string _applicationName;
         private PeriodicTimer? _timer;
         private readonly CancellationTokenSource _cts = new();
-        public ConfigurationReader(string applicationName, string connectionString, int refreshTimerIntervalInMs)
+        private readonly List<cs_ConfigData> _cache = new List<cs_ConfigData>();
+        public ConfigurationReader(string applicationName, int refreshTimerIntervalInMs)
         {
             _applicationName = applicationName;
-            _connectionString = connectionString;
-            _clientContext = new MongoDbContext(_connectionString);
             _context = new MongoDbContext(Program.mongoConnectionString);
             _timer = new PeriodicTimer(TimeSpan.FromMilliseconds(refreshTimerIntervalInMs));
-            _ = RunPeriodicSyncAsync(_cts.Token);
+            _ = RunPeriodic(_cts.Token);
         }
-        private async Task RunPeriodicSyncAsync(CancellationToken token)
+        private async Task RunPeriodic(CancellationToken token)
         {
+            _cache.Clear();
+            _cache.AddRange(await _context.GetConfigDataCollection()
+                .Find(x => x.ApplicationName == _applicationName && x.IsActive == 1)
+                .ToListAsync());
+
             if (_timer == null)
             {
                 return;
@@ -29,94 +35,98 @@ namespace CodeCase
 
             while (await _timer.WaitForNextTickAsync(token))
             {
-                await SyncConfigsAsync();
+                await SyncConfigs();
             }
         }
-        private async Task SyncConfigsAsync()
+        private async Task SyncConfigs()
         {
-            var clientCol = _clientContext.GetConfigDataCollection();
             var centralCol = _context.GetConfigDataCollection();
 
             var now = DateTime.UtcNow;
 
-            var lastSyncDate = await centralCol
-                .Find(x => x.ApplicationName == _applicationName)
-                .SortByDescending(x => x.LastSynced)
-                .Project(x => x.LastSynced)
-                .FirstOrDefaultAsync();
+            var lastSyncDate = _cache.Any() ? _cache.Where(x => x.ApplicationName == _applicationName && x.Id > 0)
+            .Max(x => x.LastModified) : DateTime.MinValue;
 
-            var changedUserConfigs = await clientCol
+            foreach (var item in _cache.Where(x => x.Id < 0))
+            {
+                item.Id = await _context.GetCollectionId(MongoDbContext.collectionName);
+                item.LastSynced = now;
+                await centralCol.InsertOneAsync(item);
+            }
+
+            foreach (var item in _cache.Where(x => x.LastModified >= lastSyncDate))
+            {
+                var filter = Builders<cs_ConfigData>.Filter.And(
+                  Builders<cs_ConfigData>.Filter.Eq(x => x.ApplicationName, _applicationName),
+                  Builders<cs_ConfigData>.Filter.Eq(x => x.Name, item.Name),
+                  Builders<cs_ConfigData>.Filter.Eq(x => x.Id, item.Id)
+              );
+
+                item.LastSynced = now;
+                await centralCol.ReplaceOneAsync(filter, item, new ReplaceOptions { IsUpsert = true });
+            }
+
+            var updated = await _context.GetConfigDataCollection()
                 .Find(x => x.ApplicationName == _applicationName && x.LastModified >= lastSyncDate)
                 .ToListAsync();
 
-            var changedCentralConfigs = await centralCol
-                .Find(x => x.ApplicationName == _applicationName && x.LastModified >= lastSyncDate)
-                .ToListAsync();
-
-            foreach (var userCfg in changedUserConfigs)
+            foreach (var item in updated)
             {
-                var filter = Builders<cs_ConfigData>.Filter.And(
-                    Builders<cs_ConfigData>.Filter.Eq(x => x.ApplicationName, _applicationName),
-                    Builders<cs_ConfigData>.Filter.Eq(x => x.Name, userCfg.Name)
-                );
-
-                userCfg.LastSynced = now;
-                await centralCol.ReplaceOneAsync(filter, userCfg, new ReplaceOptions { IsUpsert = true });
-            }
-
-            foreach (var centralCfg in changedCentralConfigs)
-            {
-                var filter = Builders<cs_ConfigData>.Filter.And(
-                    Builders<cs_ConfigData>.Filter.Eq(x => x.ApplicationName, _applicationName),
-                    Builders<cs_ConfigData>.Filter.Eq(x => x.Name, centralCfg.Name)
-                );
-
-                centralCfg.LastSynced = now;
-                await clientCol.ReplaceOneAsync(filter, centralCfg, new ReplaceOptions { IsUpsert = true });
-            }
-        }
-        public async Task<T> getValue<T>(string key)
-        {
-            var doc = await _clientContext.GetConfigDataCollection().Find(x => x.ApplicationName == _applicationName && x.Name == key && x.IsActive == 1).FirstOrDefaultAsync();
-            if (doc is null) throw new KeyNotFoundException(key);
-            return (T)Convert.ChangeType(doc.Value, typeof(T));
-        }
-        public async Task<bool> addConfig(cs_ConfigDataView data)
-        {
-            try
-            {
-                await _context.GetConfigDataCollection().InsertOneAsync(new cs_ConfigData
+                var existing = _cache.FirstOrDefault(x => x.Id == item.Id);
+                if (existing == null)
                 {
-                    Id = await _context.GetCollectionId(MongoDbContext.collectionName),
-                    Name = data.Name,
-                    Type = data.Value.GetType().Name,
-                    Value = data.Value,
+                    _cache.Add(item);
+                }
+                else
+                {
+                    existing.IsActive = item.IsActive;
+                    existing.LastModified = item.LastModified;
+                    existing.Value = item.Value;
+                    existing.LastSynced = item.LastSynced;
+                }
+            }
+        }
+        public T getValue<T>(string key)
+        {
+            var cfg = _cache.FirstOrDefault(x => x.Name == key);
+            if (cfg != null && cfg.ApplicationName == _applicationName && cfg.IsActive == 1 && cfg.Id > 0)
+            {
+                return (T)Convert.ChangeType(cfg.Value, typeof(T));
+            }
+            throw new Exception("Hata");
+        }
+        public bool addConfig<T>(string key, T value)
+        {
+            var cfg = _cache.FirstOrDefault(x => x.Name == key);
+            if (cfg != null && cfg.ApplicationName == _applicationName)
+            {
+                cfg.Value = value?.ToString() ?? "";
+                cfg.LastModified = DateTime.UtcNow;
+                cfg.IsActive = 1;
+            }
+            else
+            {
+                _cache.Add(new cs_ConfigData
+                {
+                    Name = key,
+                    Type = typeof(T).Name,
+                    Value = value?.ToString() ?? "",
                     IsActive = 1,
                     ApplicationName = _applicationName
                 });
-                return true;
             }
-            catch (Exception ex)
-            {
-                return false;
-            }
+            return true;
         }
-        public async Task<bool> deleteConfig(int id)
+        public bool deleteConfig(string key)
         {
-            try
+            var cfg = _cache.FirstOrDefault(x => x.Name == key);
+            if (cfg != null && cfg.ApplicationName == _applicationName)
             {
-                var filter = Builders<cs_ConfigData>.Filter.Eq(x => x.Id, id);
-                var update = Builders<cs_ConfigData>.Update.Set(x => x.IsActive, 0)
-                    .Set(x => x.LastModified, DateTime.UtcNow);
-
-                await _context.GetConfigDataCollection()
-                              .UpdateOneAsync(filter, update);
+                cfg.IsActive = 0;
+                cfg.LastModified = DateTime.UtcNow;
                 return true;
             }
-            catch (Exception ex)
-            {
-                return false;
-            }
+            return false;
         }
     }
 }
