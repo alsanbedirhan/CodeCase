@@ -1,13 +1,10 @@
-﻿using Amazon.Runtime.Internal.Util;
-using DBConnection;
+﻿using DBConnection;
 using DBConnection.Models;
 using MongoDB.Driver;
-using System.Collections.Concurrent;
-using System.Diagnostics.Contracts;
 
 namespace CodeCase
 {
-    public class ConfigurationReader
+    public class ConfigurationReader : IDisposable
     {
         MongoDbContext _context;
         string _applicationName;
@@ -44,8 +41,8 @@ namespace CodeCase
 
             var now = DateTime.UtcNow;
 
-            var lastSyncDate = _cache.Any() ? _cache.Where(x => x.ApplicationName == _applicationName && x.Id > 0)
-            .Max(x => x.LastModified) : DateTime.MinValue;
+            var lastSyncDate = _cache.Any(x => x.ApplicationName == _applicationName) ? _cache.Where(x => x.ApplicationName == _applicationName)
+                .Max(x => x.LastSynced) : DateTime.MinValue;
 
             foreach (var item in _cache.Where(x => x.Id <= 0))
             {
@@ -88,17 +85,13 @@ namespace CodeCase
         }
         public T getValue<T>(string key)
         {
-            var cfg = _cache.FirstOrDefault(x => x.Name == key);
-            if (cfg != null && cfg.ApplicationName == _applicationName && cfg.IsActive == 1 && cfg.Id > 0)
-            {
-                return (T)Convert.ChangeType(cfg.Value, typeof(T));
-            }
-            throw new Exception("Hata");
+            var cfg = _cache.FirstOrDefault(x => x.Name == key && x.ApplicationName == _applicationName && x.IsActive == 1 && x.Id > 0);
+            return cfg != null ? ((T)Convert.ChangeType(cfg.Value, typeof(T))) : default!;
         }
         public bool addConfig<T>(string key, T value)
         {
-            var cfg = _cache.FirstOrDefault(x => x.Name == key);
-            if (cfg != null && cfg.ApplicationName == _applicationName)
+            var cfg = _cache.FirstOrDefault(x => x.Name == key && x.ApplicationName == _applicationName);
+            if (cfg != null)
             {
                 cfg.Value = value?.ToString() ?? "";
                 cfg.LastModified = DateTime.UtcNow;
@@ -119,14 +112,20 @@ namespace CodeCase
         }
         public bool deleteConfig(string key)
         {
-            var cfg = _cache.FirstOrDefault(x => x.Name == key);
-            if (cfg != null && cfg.ApplicationName == _applicationName)
+            var cfg = _cache.FirstOrDefault(x => x.Name == key && x.ApplicationName == _applicationName);
+            if (cfg != null)
             {
                 cfg.IsActive = 0;
                 cfg.LastModified = DateTime.UtcNow;
                 return true;
             }
             return false;
+        }
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _timer?.Dispose();
+            _cts.Dispose();
         }
     }
 }
