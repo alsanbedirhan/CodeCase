@@ -1,5 +1,4 @@
-﻿using CodeCase.Models;
-using DBConnection;
+﻿using DBConnection;
 using DBConnection.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
@@ -30,7 +29,7 @@ namespace CodeCase.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create([Bind("Name,Type,Value")] cs_ConfigData cs_ConfigData)
+        public async Task<IActionResult> Create([Bind("Name,Type,Value,ApplicationName")] cs_ConfigData cs_ConfigData)
         {
             if (ModelState.IsValid)
             {
@@ -39,10 +38,8 @@ namespace CodeCase.Controllers
                 cs_ConfigData.Id = id;
 
                 collection.InsertOne(cs_ConfigData);
-
-                return RedirectToAction(nameof(Index));
             }
-            return View(cs_ConfigData);
+            return RedirectToAction(nameof(Index));
         }
 
         public async Task<IActionResult> Details(int? id)
@@ -65,7 +62,7 @@ namespace CodeCase.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(int? id, [Bind("Id,Name,Type,Value")] cs_ConfigData cs_ConfigData)
+        public async Task<IActionResult> Edit(int? id, [Bind("Id,Name,Type,Value,ApplicationName")] cs_ConfigData cs_ConfigData)
         {
             if (id != cs_ConfigData.Id)
             {
@@ -78,7 +75,8 @@ namespace CodeCase.Controllers
                 var update = Builders<cs_ConfigData>.Update
                     .Set(x => x.Name, cs_ConfigData.Name)
                     .Set(x => x.Type, cs_ConfigData.Type)
-                    .Set(x => x.Value, cs_ConfigData.Value);
+                    .Set(x => x.Value, cs_ConfigData.Value)
+                    .Set(x => x.ApplicationName, cs_ConfigData.ApplicationName);
 
                 await _context.GetConfigDataCollection()
                               .UpdateOneAsync(filter, update);
@@ -90,7 +88,6 @@ namespace CodeCase.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Delete(int? id)
         {
-
             var filter = Builders<cs_ConfigData>.Filter.Eq(x => x.Id, id);
             var update = Builders<cs_ConfigData>.Update.Set(x => x.IsActive, 0);
 

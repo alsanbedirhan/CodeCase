@@ -47,7 +47,7 @@ namespace CodeCase
             var lastSyncDate = _cache.Any() ? _cache.Where(x => x.ApplicationName == _applicationName && x.Id > 0)
             .Max(x => x.LastModified) : DateTime.MinValue;
 
-            foreach (var item in _cache.Where(x => x.Id < 0))
+            foreach (var item in _cache.Where(x => x.Id <= 0))
             {
                 item.Id = await _context.GetCollectionId(MongoDbContext.collectionName);
                 item.LastSynced = now;

@@ -9,7 +9,9 @@
     <a asp-action="Create">Ekle</a>
 </p>
 <hr />
-<table class="table">
+<input id="filterInput" type="text" placeholder="İsme göre filtrele..." />
+<hr />
+<table id="grid" class="table">
     <thead>
         <tr>
             <th>
@@ -40,7 +42,7 @@
                 <td>
                     @Html.DisplayFor(modelItem => item.Id)
                 </td>
-                <td>
+                <td data-col="name">
                     @Html.DisplayFor(modelItem => item.Name)
                 </td>
                 <td>
@@ -67,3 +69,22 @@
         }
     </tbody>
 </table>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const input = document.getElementById("filterInput");
+        const rows = document.querySelectorAll("#grid tbody tr");
+
+        input.addEventListener("input", function () {
+            const search = input.value.trim().toLowerCase();
+
+            rows.forEach(row => {
+                const nameCell = row.querySelector('[data-col="name"]');
+                if (!nameCell) return;
+
+                const text = nameCell.textContent.trim().toLowerCase();
+                row.style.display = text.includes(search) ? "" : "none";
+            });
+        });
+    });
+</script>

@@ -32,37 +32,64 @@
     <script>
         document.addEventListener("DOMContentLoaded", function () {
             const typeSelect = document.getElementById("typeSelect");
-            if (!typeSelect) return; 
+            if (!typeSelect) return;
 
             function updateValueInput() {
-                let valueInput = document.getElementById("valueInput");
+                const valueContainer = document.getElementById("valueContainer");
+                const oldInput = document.getElementById("valueInput");
                 const selected = typeSelect.value;
-                const currentValue = valueInput ? valueInput.value : "";
+                const currentValue = oldInput ? oldInput.value : "";
 
                 let newInputHtml = "";
 
-                if (selected === "bool") {
-                    newInputHtml = `
-                        <input type="hidden" name="Value" value="false" />
-                        <input type="checkbox" id="valueInput" name="Value" class="form-check-input" value="true" ${(currentValue === "true") ? "checked" : ""} />
-                    `;
-                }
-                else if (selected === "int" || selected === "double") {
-                    newInputHtml = `<input id="valueInput" name="Value" class="form-control" type="number" value="${currentValue}" />`;
-                }
-                else if (selected === "date") {
-                    newInputHtml = `<input id="valueInput" name="Value" class="form-control" type="date" value="${currentValue}" />`;
-                }
-                else {
-                    newInputHtml = `<input id="valueInput" name="Value" class="form-control" type="text" value="${currentValue}" />`;
+                switch (selected) {
+                    case "bool":
+                        newInputHtml = `
+                            <div class="form-check">
+                                <input type="checkbox" id="valueInput" class="form-check-input" ${(currentValue.toLowerCase() === "true") ? "checked" : ""} />
+                                <input type="hidden" id="hiddenValue" name="Value" value="${currentValue.toLowerCase() === "true" ? "true" : "false"}" />
+                            </div>`;
+                        break;
+
+                    case "int":
+                        newInputHtml = `<input id="valueInput" name="Value" class="form-control" type="number" step="1" value="${currentValue}" />`;
+                        break;
+
+                    case "double":
+                        newInputHtml = `<input id="valueInput" name="Value" class="form-control" type="number" step="any" value="${currentValue}" />`;
+                        break;
+
+                    case "date":
+                        newInputHtml = `<input id="valueInput" name="Value" class="form-control" type="date" value="${currentValue}" />`;
+                        break;
+
+                    default:
+                        newInputHtml = `<input id="valueInput" name="Value" class="form-control" type="text" value="${currentValue}" />`;
+                        break;
                 }
 
-                valueInput.outerHTML = newInputHtml;
+                oldInput.outerHTML = newInputHtml;
+
+                attachCheckboxListener();
             }
+
+            function attachCheckboxListener() {
+                const checkbox = document.getElementById("valueInput");
+                if (!checkbox || checkbox.type !== "checkbox") return;
+
+                checkbox.addEventListener("change", function () {
+                    const hidden = document.getElementById("hiddenValue");
+                    if (hidden)
+                        hidden.value = checkbox.checked ? "true" : "false";
+                });
+            }
+
+            updateValueInput();
 
             typeSelect.addEventListener("change", updateValueInput);
         });
     </script>
+
 
 </body>
 </html>
